@@ -1,6 +1,13 @@
 import React, { useEffect, useState, ChangeEvent } from "react";
 import { MetaMaskInpageProvider } from "@metamask/providers";
-import { createPublicClient, createWalletClient, custom, getContract, http, WalletClient } from "viem";
+import {
+  createPublicClient,
+  createWalletClient,
+  custom,
+  getContract,
+  http,
+  WalletClient,
+} from "viem";
 import { sepolia } from "viem/chains";
 import { CONTRACT_ADDRESS } from "./shared/consts";
 import { CONTRACT_ABI } from "./abi/contract.abi";
@@ -12,10 +19,18 @@ declare global {
 }
 
 interface StudentInfo {
+  mssv: number;
   name: string;
   birthYear: number;
   managementClass: string;
-  completedCourses: number[];
+}
+
+interface StudentInfoDetails {
+  mssv: number;
+  name: string;
+  birthYear: number;
+  managementClass: string;
+  completed: string[];
 }
 
 const App = () => {
@@ -23,29 +38,52 @@ const App = () => {
   const [client, setClient] = useState<WalletClient>();
   const [publicClient, setPublicClient] = useState<any>(null);
   const [user, setUser] = useState<string>("");
-  const [studentInfo, setStudentInfo] = useState<StudentInfo | null>(null);
+  const [studentInfo, setStudentInfo] = useState<StudentInfoDetails | null>(
+    null
+  );
   const [studentId, setStudentId] = useState<number>(0);
+  const [studentIdDetail, setStudentIdDetail] = useState<number>(0);
   const [studentName, setStudentName] = useState<string>("");
   const [birthYear, setBirthYear] = useState<number>(0);
   const [managementClass, setManagementClass] = useState<string>("");
   const [newName, setNewName] = useState<string>("");
-  const [transactionStatus, setTransactionStatus] = useState<"idle" | "pending" | "success" | "error">("idle");
+  const [addTransactionStatus, setAddTransactionStatus] = useState<
+    "idle" | "pending" | "success" | "error"
+  >("idle");
+  const [deleteTransactionStatus, setDeleteTransactionStatus] = useState<
+    "idle" | "pending" | "success" | "error"
+  >("idle");
   const [transactionHash, setTransactionHash] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [studentsList, setStudentsList] = useState<StudentInfo[]>([]);
+  const [studentIds, setStudentIds] = useState<number[]>([]);
+  const [loadingStudents, setLoadingStudents] = useState<boolean>(false);
+  const [start, setStart] = useState<number>(0);
+  const [end, setEnd] = useState<number>(1);
+  const [totalStudent, setTotalStudent] = useState<number>(0);
+  const [deleteMssv, setDeleteMssv] = useState<number>(0);
+
+  const handleDeleteMssvChange = (e: ChangeEvent<HTMLInputElement>) => {
+    setDeleteMssv(Number(e.target.value));
+  };
 
   useEffect(() => {
     const connectWallet = async () => {
       if (typeof window.ethereum !== "undefined") {
         try {
           const ethereum = window.ethereum;
-          const accounts = await ethereum.request({
-            method: "eth_requestAccounts",
-          }).catch((error: any) => {
-            if (error.code === -32002) {
-              alert('Please check MetaMask. Connection request already pending.');
-            }
-            throw error;
-          }) as string[];
+          const accounts = (await ethereum
+            .request({
+              method: "eth_requestAccounts",
+            })
+            .catch((error: any) => {
+              if (error.code === -32002) {
+                alert(
+                  "Please check MetaMask. Connection request already pending."
+                );
+              }
+              throw error;
+            })) as string[];
 
           if (accounts && accounts.length > 0) {
             setUser(accounts[0]);
@@ -101,7 +139,6 @@ const App = () => {
 
     detectProvider();
 
-    // Listen for account changes
     window.ethereum?.on("accountsChanged", detectProvider);
 
     return () => {
@@ -122,58 +159,57 @@ const App = () => {
       console.error("Client or contract not initialized");
       return;
     }
-  
+
     if (!validateInputs()) return;
-  
-    setTransactionStatus("pending");
+
+    setAddTransactionStatus("pending");
     setErrorMessage(null);
     setTransactionHash(null);
-  
+
     try {
       const { request } = await publicClient.simulateContract({
         address: CONTRACT_ADDRESS,
         abi: CONTRACT_ABI,
-        functionName: 'addStudent',
+        functionName: "addStudent",
         args: [studentId, studentName, birthYear, managementClass],
         account: client.account,
       });
-  
+
       const hash = await client.writeContract(request);
       setTransactionHash(hash);
-  
-      // Wait for transaction confirmation
+
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
-  
+
       if (receipt.status === "success") {
-        setTransactionStatus("success");
+        setAddTransactionStatus("success");
         alert("Student Added!");
       } else {
-        setTransactionStatus("error");
+        setAddTransactionStatus("error");
         setErrorMessage("Transaction failed. Please try again.");
       }
     } catch (error: any) {
       console.error("Error adding student:", error);
-  
-      // Log detailed error in the console
-      console.log("Detailed error from blockchain:", error);
-  
-      // Extract detailed error message from the blockchain
-      let detailedErrorMessage = "Thêm student lỗi."; // Updated error message
-  
+      let detailedErrorMessage = "Thêm student lỗi.";
       if (error?.shortMessage?.includes("ContractFunctionRevertedError")) {
-        // Try to extract the error reason from the error object
-        const errorReason = error?.cause?.data?.errorName || error?.cause?.data?.message || error?.shortMessage;
+        const errorReason =
+          error?.cause?.data?.errorName ||
+          error?.cause?.data?.message ||
+          error?.shortMessage;
         detailedErrorMessage = `Blockchain error: ${errorReason}`;
       } else if (error?.shortMessage?.includes("StudentAlreadyExists")) {
         detailedErrorMessage = `Sinh viên với MSSV ${studentId} đã tồn tại.`;
       }
-  
       setErrorMessage(detailedErrorMessage);
-      setTransactionStatus("error");
+      setAddTransactionStatus("error");
     }
   };
+
   const getStudentInfo = async (): Promise<void> => {
-    if (studentId <= 0 || !(typeof studentId === "number") || studentId === 0) {
+    if (
+      studentIdDetail <= 0 ||
+      !(typeof studentIdDetail === "number") ||
+      studentIdDetail === 0
+    ) {
       alert("Invalid Student ID");
       return;
     }
@@ -185,15 +221,18 @@ const App = () => {
         const data = await publicClient.readContract({
           address: CONTRACT_ADDRESS,
           abi: CONTRACT_ABI,
-          functionName: 'getStudentByMSSV',
-          args: [studentId],
+          functionName: "getStudentByMSSV",
+          args: [studentIdDetail],
         });
 
+        console.log("Data: ", data);
+
         setStudentInfo({
+          mssv: Number(data[0]),
           name: data[1],
           birthYear: Number(data[2]),
           managementClass: data[3],
-          completedCourses: [], // You need to fetch completed courses separately if needed
+          completed: [],
         });
 
         console.log("data: ", data);
@@ -221,7 +260,7 @@ const App = () => {
       const { request } = await publicClient.simulateContract({
         address: CONTRACT_ADDRESS,
         abi: CONTRACT_ABI,
-        functionName: 'updateStudentName',
+        functionName: "updateStudentName",
         args: [studentId, newName],
         account: client.account,
       });
@@ -235,49 +274,179 @@ const App = () => {
     }
   };
 
+  const fetchStudents = async () => {
+    console.log("start: ", start);
+    console.log("end: ", end);
+
+    if (!contract || !publicClient) {
+      console.error("Contract or public client not initialized");
+      return;
+    }
+
+    setLoadingStudents(true);
+    setStudentsList([]);
+
+    try {
+      const studentIds = await publicClient.readContract({
+        address: CONTRACT_ADDRESS,
+        abi: CONTRACT_ABI,
+        functionName: "getStudentsInRange",
+        args: [start, end],
+      });
+
+      setStudentIds(studentIds);
+
+      const students: StudentInfo[] = [];
+      for (const studentId of studentIds) {
+        const studentData = await publicClient.readContract({
+          address: CONTRACT_ADDRESS,
+          abi: CONTRACT_ABI,
+          functionName: "getStudentByMSSV",
+          args: [studentId],
+        });
+
+        if (studentData && studentData[4]) {
+          students.push({
+            mssv: Number(studentData[0]),
+            name: studentData[1],
+            birthYear: Number(studentData[2]),
+            managementClass: studentData[3],
+          });
+        }
+      }
+
+      setStudentsList(students);
+    } catch (error) {
+      console.error("Error fetching students:", error);
+      alert("Failed to fetch students");
+    } finally {
+      setLoadingStudents(false);
+    }
+  };
+
+  useEffect(() => {
+    console.log("studentListLength after update: ", studentsList.length);
+  }, [studentsList]);
+
+  const getTotalStudents = async () => {
+    setLoadingStudents(true);
+    const totalStudent = await publicClient.readContract({
+      address: CONTRACT_ADDRESS,
+      abi: CONTRACT_ABI,
+      functionName: "getTotalStudents",
+    });
+
+    setTotalStudent(Number(totalStudent));
+    setLoadingStudents(false);
+  };
+
   const handleStudentIdChange = (e: ChangeEvent<HTMLInputElement>) => {
     setStudentId(Number(e.target.value));
+  };
+
+  const handleStudentIdDetailChange = (e: ChangeEvent<HTMLInputElement>) => {
+    setStudentIdDetail(Number(e.target.value));
   };
 
   const handleNewNameChange = (e: ChangeEvent<HTMLInputElement>) => {
     setNewName(e.target.value);
   };
 
+  const deleteStudent = async (mssv: number): Promise<void> => {
+    if (!client || !contract) {
+      console.error("Client or contract not initialized");
+      return;
+    }
+
+    if (mssv <= 0) {
+      alert("Invalid Student ID");
+      return;
+    }
+
+    setDeleteTransactionStatus("pending");
+    setErrorMessage(null);
+    setTransactionHash(null);
+
+    try {
+      const { request } = await publicClient.simulateContract({
+        address: CONTRACT_ADDRESS,
+        abi: CONTRACT_ABI,
+        functionName: "deleteStudent",
+        args: [mssv],
+        account: client.account,
+      });
+
+      const hash = await client.writeContract(request);
+      setTransactionHash(hash);
+
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+
+      if (receipt.status === "success") {
+        setDeleteTransactionStatus("success");
+        alert("Student Deleted Successfully!");
+        fetchStudents();
+      } else {
+        setDeleteTransactionStatus("error");
+        setErrorMessage("Transaction failed. Please try again.");
+      }
+    } catch (error: any) {
+      console.error("Error deleting student:", error);
+      let detailedErrorMessage = "Xóa sinh viên thất bại.";
+      if (error?.shortMessage?.includes("ContractFunctionRevertedError")) {
+        const errorReason =
+          error?.cause?.data?.errorName ||
+          error?.cause?.data?.message ||
+          error?.shortMessage;
+        detailedErrorMessage = `Blockchain error: ${errorReason}`;
+      } else if (error?.shortMessage?.includes("StudentNotFound")) {
+        detailedErrorMessage = `Sinh viên với MSSV ${mssv} không tồn tại.`;
+      }
+      setErrorMessage(detailedErrorMessage);
+      setDeleteTransactionStatus("error");
+    }
+  };
+
   return (
     <div className="App">
       <h1>Student Management</h1>
-      <button onClick={async () => {
-        if (!user) {
-          try {
-            const ethereum = window.ethereum;
-            if (ethereum) {
-              const accounts = await ethereum.request({
-                method: "eth_requestAccounts",
-              }).catch((error: any) => {
-                if (error.code === -32002) {
-                  alert('Please check MetaMask. Connection request already pending.');
+      <button
+        onClick={async () => {
+          if (!user) {
+            try {
+              const ethereum = window.ethereum;
+              if (ethereum) {
+                const accounts = (await ethereum
+                  .request({
+                    method: "eth_requestAccounts",
+                  })
+                  .catch((error: any) => {
+                    if (error.code === -32002) {
+                      alert(
+                        "Please check MetaMask. Connection request already pending."
+                      );
+                    }
+                    throw error;
+                  })) as string[];
+                if (accounts && accounts.length > 0) {
+                  setUser(accounts[0]);
                 }
-                throw error;
-              }) as string[];
-              if (accounts && accounts.length > 0) {
-                setUser(accounts[0]);
               }
+            } catch (error) {
+              console.error("Connection error:", error);
             }
-          } catch (error) {
-            console.error('Connection error:', error);
+          } else {
+            setUser("");
+            setClient(undefined);
+            setContract(null);
           }
-        } else {
-          setUser("");
-          setClient(undefined);
-          setContract(null);
-        }
-      }}>
+        }}
+      >
         {user ? "Disconnect Wallet" : "Connect Wallet"}
       </button>
       <h2>Connected Account: {user}</h2>
 
       <div>
-        <h2>Add student</h2>
+        <h2>Thêm sinh viên</h2>
         <div>
           <input
             type="number"
@@ -303,12 +472,15 @@ const App = () => {
             value={managementClass}
             onChange={(e) => setManagementClass(e.target.value)}
           />
-          <button onClick={addStudent} disabled={transactionStatus === "pending"}>
-            {transactionStatus === "pending" ? "Adding..." : "Add Student"}
+          <button
+            onClick={addStudent}
+            disabled={addTransactionStatus === "pending"}
+          >
+            {addTransactionStatus === "pending" ? "Đang thêm" : "Thêm sinh viên"}
           </button>
         </div>
 
-        {transactionStatus === "success" && transactionHash && (
+        {addTransactionStatus === "success" && transactionHash && (
           <div style={{ color: "green", marginTop: "10px" }}>
             <p>Thêm sinh viên thành công</p>
             <a
@@ -321,7 +493,7 @@ const App = () => {
           </div>
         )}
 
-        {transactionStatus === "error" && (
+        {addTransactionStatus === "error" && (
           <div style={{ color: "red", marginTop: "10px" }}>
             <p>{errorMessage}</p>
           </div>
@@ -329,36 +501,104 @@ const App = () => {
       </div>
 
       <div>
-        <h2>Get Student Info</h2>
+        <h2>Xoá sinh viên</h2>
         <input
           type="number"
-          placeholder="Enter Student ID"
-          onChange={handleStudentIdChange}
+          placeholder="Nhập vào mssv"
+          value={deleteMssv}
+          onChange={handleDeleteMssvChange}
         />
-        <button onClick={getStudentInfo}>Get Student Info</button>
-        {studentInfo && (
-          <div>
-            <p>Tên: {studentInfo.name}</p>
-            <p>Năm sinh: {studentInfo.birthYear.toString()}</p>
-            <p>Lớp: {studentInfo.managementClass}</p>
-            <p>Khoá học đã hoàn thành: {studentInfo.completedCourses.join(', ')}</p>
+        <button
+          onClick={() => deleteStudent(deleteMssv)}
+          disabled={deleteTransactionStatus === "pending"}
+        >
+          {deleteTransactionStatus === "pending" ? "Đang xoá..." : "Xoá student"}
+        </button>
+
+        {deleteTransactionStatus === "success" && transactionHash && (
+          <div style={{ color: "green", marginTop: "10px" }}>
+            <p>Xóa sinh viên thành công</p>
+            <a
+              href={`https://sepolia.etherscan.io/tx/${transactionHash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Xem trên Sepolia Etherscan
+            </a>
+          </div>
+        )}
+
+        {deleteTransactionStatus === "error" && (
+          <div style={{ color: "red", marginTop: "10px" }}>
+            <p>{errorMessage}</p>
           </div>
         )}
       </div>
 
       <div>
-        <h2>Update Student Name</h2>
+        <h2>Lấy thông tin chi tiết sinh viên</h2>
         <input
           type="number"
-          placeholder="Enter Student ID"
-          onChange={handleStudentIdChange}
+          placeholder="Nhập vào mssv"
+          onChange={handleStudentIdDetailChange}
         />
-        <input
-          type="text"
-          placeholder="New Name"
-          onChange={handleNewNameChange}
-        />
-        <button onClick={updateStudentName}>Update Name</button>
+        <button onClick={getStudentInfo}>Lấy</button>
+        {studentInfo && (
+          <div>
+            <p>Mssv: {studentInfo.mssv}</p>
+            <p>Tên: {studentInfo.name}</p>
+            <p>Năm sinh: {studentInfo.birthYear.toString()}</p>
+            <p>Lớp: {studentInfo.managementClass}</p>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <h2>Tổng số sinh viên</h2>
+        <button onClick={getTotalStudents} disabled={loadingStudents}>
+          Lấy
+        </button>
+        {loadingStudents ? (
+          "Đang load ..."
+        ) : (
+          <p>Tổng số sinh viên: {totalStudent}</p>
+        )}
+      </div>
+
+      <div>
+        <h2>Danh sách sinh viên </h2>
+        <div>
+          <input
+            type="number"
+            placeholder="Start"
+            value={start}
+            onChange={(e) => setStart(Number(e.target.value))}
+          />
+          <input
+            type="number"
+            placeholder="End"
+            value={end}
+            onChange={(e) => setEnd(Number(e.target.value))}
+          />
+          <button onClick={fetchStudents} disabled={loadingStudents}>
+            {loadingStudents ? "Đang load..." : "Lấy sinh viên"}
+          </button>
+        </div>
+
+        {loadingStudents ? (
+          <p>Đang tải danh sách sinh viên...</p>
+        ) : (
+          <ul>
+            {studentsList.map((student, index) => (
+              <li key={index}>
+                <p>
+                  <strong>MSSV:</strong> {Number(student.mssv)} - {student.name}{" "}
+                  - {student.birthYear} - {student.managementClass}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );
