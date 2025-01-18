@@ -2,6 +2,14 @@
 pragma solidity ^0.8.0;
 
 contract StudentManagement {
+    // Custom errors
+    error StudentAlreadyExists(uint256 mssv); // Lỗi khi sinh viên đã tồn tại
+    error StudentNotFound(uint256 mssv); // Lỗi khi sinh viên không tồn tại
+    error InvalidGrade(uint256 diem); // Lỗi khi điểm không hợp lệ
+    error CourseNotCompleted(uint256 maMonHoc); // Lỗi khi môn học chưa hoàn thành
+    error NotOwner(address caller); // Lỗi khi người gọi không phải là owner
+    error InvalidRange(uint256 start, uint256 end); // Lỗi khi khoảng không hợp lệ
+
     struct Student {
         uint256 mssv;
         string ten;
@@ -26,7 +34,9 @@ contract StudentManagement {
     event GradeUpdated(uint256 indexed studentId, uint256 courseId, uint256 grade);
 
     modifier onlyOwner() {
-        require(msg.sender == owner, "Ban Khong phai la nguoi so huu smart contract");
+        if (msg.sender != owner) {
+            revert NotOwner(msg.sender);
+        }
         _;
     }
 
@@ -47,7 +57,9 @@ contract StudentManagement {
         string memory _lopQuanLy
     ) public onlyOwner {
         // Kiem tra sinh vien da ton tai chua
-        require(!students[_mssv].exists, "Sinh vien da ton tai");
+        if (students[_mssv].exists) {
+            revert StudentAlreadyExists(_mssv);
+        }
         
         // Khai bao sinh vien moi & them vao mapping
         Student storage newStudent = students[_mssv];
@@ -67,7 +79,9 @@ contract StudentManagement {
     // Xoa sinh vien
     function deleteStudent(uint256 _mssv) public onlyOwner {
         // Kiem tra sinh vien ton tai
-        require(students[_mssv].exists, "Sinh vien khong ton tai");
+        if (!students[_mssv].exists) {
+            revert StudentNotFound(_mssv);
+        }
 
         // Xoa sinh vien khoi mapping
         delete students[_mssv];
@@ -90,8 +104,12 @@ contract StudentManagement {
     // Them mon hoc da hoan thanh va diem mon hoc
     function addCompletedCourse(uint256 _mssv, uint256 _maMonHoc, uint256 _diem) public onlyOwner {
         // Kiem tra sinh vien ton tai
-        require(students[_mssv].exists, "Sinh vien khong ton tai");
-        require(_diem >= 0 && _diem <= 10, "Diem phai nam trong khoang 0-10");
+        if (!students[_mssv].exists) {
+            revert StudentNotFound(_mssv);
+        }
+        if (_diem < 0 || _diem > 10) {
+            revert InvalidGrade(_diem);
+        }
 
         // Lay thong tin sinh vien
         Student storage student = students[_mssv];
@@ -125,7 +143,9 @@ contract StudentManagement {
         bool exists
     ) {
         // Kiem tra sinh vien ton tai chua
-        require(students[_mssv].exists, "Sinh vien khong ton tai");
+        if (!students[_mssv].exists) {
+            revert StudentNotFound(_mssv);
+        }
 
         // Lay thong tin sinh vien
         Student storage student = students[_mssv];
@@ -142,8 +162,12 @@ contract StudentManagement {
 
     // Lay so luong sinh vien trong khoang
     function getStudentsInRange(uint256 start, uint256 end) public view returns (uint256[] memory) {
-        require(start <= end, "Start phai nho hon hoac bang End");
-        require(end < studentArray.length, "End vuot qua so luong sinh vien");
+        if (start > end) {
+            revert InvalidRange(start, end);
+        }
+        if (end >= studentArray.length) {
+            revert InvalidRange(start, end);
+        }
 
         uint256 size = end - start + 1;
         uint256[] memory result = new uint256[](size);
@@ -162,13 +186,17 @@ contract StudentManagement {
 
     // Lay danh sach mon hoc da hoan thanh cua sinh vien
     function getCompletedCourses(uint256 _mssv) public view returns (uint256[] memory) {
-        require(students[_mssv].exists, "Sinh vien khong ton tai");
+        if (!students[_mssv].exists) {
+            revert StudentNotFound(_mssv);
+        }
         return students[_mssv].monHocDaHoanThanh;
     }
 
     // Lay diem mon hoc da hoan thanh cua sinh vien
     function getGradeForCourse(uint256 _mssv, uint256 _maMonHoc) public view returns (uint256) {
-        require(students[_mssv].exists, "Sinh vien khong ton tai");
+        if (!students[_mssv].exists) {
+            revert StudentNotFound(_mssv);
+        }
         
         Student storage student = students[_mssv];
         bool courseExists = false;
@@ -180,7 +208,9 @@ contract StudentManagement {
             }
         }
         
-        require(courseExists, "Mon hoc chua duoc hoan thanh");
+        if (!courseExists) {
+            revert CourseNotCompleted(_maMonHoc);
+        }
         return student.diemMonHocDaHoanThanh[_maMonHoc];
     }
 }
